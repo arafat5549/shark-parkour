@@ -39,6 +39,9 @@ jobs:
           path: dist
 
   deploy:
+    # 私有仓库默认只构建并保存 Pages artifact，不发布公开 Pages。
+    # 如果账号支持私有仓库 Pages（GitHub Pro/Team/Enterprise），可在仓库 Variables 设置 ENABLE_PRIVATE_PAGES=1。
+    if: github.event.repository.private == false || vars.ENABLE_PRIVATE_PAGES == '1'
     needs: build
     runs-on: ubuntu-latest
     environment:

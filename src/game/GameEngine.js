@@ -158,12 +158,14 @@ export class GameEngine {
     this.dashTimer = 0;
     this.vacuumTimer = 0;
     this.phaseTimer = 0;
+    this.bubbleTimer = 0;
     this.spawnTimer = 2.0;
     this.patternCount = 0;
     this.coinRunCountdown = 5;
     this.playerY = this.h * 0.46;
     this.vy = 0;
     this.playerR = this.calcPlayerR();
+    this.initTropicalFish();
     this.hazards = [];
     this.pickups = [];
     this.particles = [];
@@ -201,6 +203,12 @@ export class GameEngine {
     this.toasts = [];
     this.pointers.clear();
     this.input = { up: false, down: false };
+  }
+
+  // 菜单里预览角色时同步设置：选中热带鱼角色时，背景鱼群会自动排除该品种。
+  setPreviewShark(shark) {
+    this.shark = shark;
+    if (this.state === 'idle' || this.state === 'over') this.initTropicalFish();
   }
 
   // ------------------------------------------------------------------ input
@@ -366,6 +374,7 @@ export class GameEngine {
     }
     if (this.vacuumTimer > 0) this.vacuumTimer -= dt;
     if (this.phaseTimer > 0) this.phaseTimer -= dt;
+    if (this.bubbleTimer > 0) this.bubbleTimer -= dt;
     if (this.abilityTimer > 0) {
       this.abilityTimer -= dt;
       if (this.abilityTimer <= 0) this.abilityActive = null;
@@ -781,7 +790,7 @@ export class GameEngine {
       this.dashTimer = ability.duration;
       this.invuln = Math.max(this.invuln, ability.duration + 0.25);
       this.shake = 0.25;
-      this.pushFloatText('极速突进！', '#7cd6ff', this.playerX(), this.playerY - 44);
+      this.pushFloatText(`${ability.name}！`, '#7cd6ff', this.playerX(), this.playerY - 44);
       this.sound('dash');
       return;
     }
@@ -792,7 +801,7 @@ export class GameEngine {
       this.abilityTimer = ability.duration;
       this.vacuumTimer = ability.duration;
       this.rings.push({ x: this.playerX(), y: this.playerY, r: 20, max: this.h * 1.1, t: 0.7, color: '#b7e6ff' });
-      this.pushFloatText('浮游虹吸！', '#b7e6ff', this.playerX(), this.playerY - 44);
+      this.pushFloatText(`${ability.name}！`, '#b7e6ff', this.playerX(), this.playerY - 44);
       this.sound('vacuum');
       return;
     }
@@ -817,8 +826,20 @@ export class GameEngine {
       }
       this.rings.push({ x: this.playerX(), y: this.playerY, r: 20, max: this.w * 0.9, t: 0.45, color: '#ffd98a' });
       this.shake = 0.4;
-      this.pushFloatText('蛮力冲撞！', '#ffd98a', this.playerX(), this.playerY - 44);
+      this.pushFloatText(`${ability.name}！`, '#ffd98a', this.playerX(), this.playerY - 44);
       this.sound('ram');
+      return;
+    }
+
+    if (key === 'bubble') {
+      this.abilityCd = ability.cooldown;
+      this.abilityActive = key;
+      this.abilityTimer = ability.duration;
+      this.bubbleTimer = ability.duration;
+      this.invuln = Math.max(this.invuln, ability.duration + 0.2);
+      this.rings.push({ x: this.playerX(), y: this.playerY, r: 20, max: this.h * 0.5, t: 0.6, color: '#9fe8ff' });
+      this.pushFloatText(`${ability.name}！`, '#9fe8ff', this.playerX(), this.playerY - 44);
+      this.sound('bubble');
       return;
     }
 
@@ -828,7 +849,7 @@ export class GameEngine {
       this.abilityTimer = ability.duration;
       this.phaseTimer = ability.duration;
       this.rings.push({ x: this.playerX(), y: this.playerY, r: 20, max: this.h * 0.8, t: 0.6, color: '#e2b7ff' });
-      this.pushFloatText('深渊潜行！', '#e2b7ff', this.playerX(), this.playerY - 44);
+      this.pushFloatText(`${ability.name}！`, '#e2b7ff', this.playerX(), this.playerY - 44);
       this.sound('phase');
       return;
     }
@@ -863,12 +884,21 @@ export class GameEngine {
     this.initTropicalFish();
   }
 
+  availableFishSpecies() {
+    // 当前选择的热带鱼角色不会出现在背景装饰鱼群中。
+    if (this.shark && this.shark.isTropicalFish) {
+      return TROPICAL_FISH_SPECIES.filter((species) => species.id !== this.shark.speciesId);
+    }
+    return TROPICAL_FISH_SPECIES;
+  }
+
   initTropicalFish() {
     this.fish = [];
     let desired = this.desiredFishCount();
     // 按 2~4 条的小鱼群生成，同群品种一致，视觉上更明显。
+    const pool = this.availableFishSpecies();
     while (this.fish.length < desired) {
-      const species = TROPICAL_FISH_SPECIES[Math.floor(Math.random() * TROPICAL_FISH_SPECIES.length)];
+      const species = pool[Math.floor(Math.random() * pool.length)];
       const dir = Math.random() < 0.5 ? -1 : 1;
       const layer = Math.random() < 0.52 ? rand(0.15, 0.5) : rand(0.55, 0.95);
       const schoolSize = Math.min(desired - this.fish.length, 2 + Math.floor(Math.random() * 3));
@@ -895,7 +925,8 @@ export class GameEngine {
 
   makeTropicalFish(anywhere = false, species = null, dir = null, layer = null) {
     const cfg = GAME_TUNING.tropicalFish;
-    const chosen = species || TROPICAL_FISH_SPECIES[Math.floor(Math.random() * TROPICAL_FISH_SPECIES.length)];
+    const pool = this.availableFishSpecies();
+    const chosen = species || pool[Math.floor(Math.random() * pool.length)];
     const h = this.h;
     const fishLayer = layer ?? rand(0.12, 0.95);
     const length = rand(chosen.length[0], chosen.length[1]) * h;
@@ -1081,6 +1112,9 @@ export class GameEngine {
       this.tone(200, 0.5, 'sine', 0.05, 0, 640);
     } else if (name === 'ram') {
       this.tone(160, 0.22, 'square', 0.06, 0, 60);
+    } else if (name === 'bubble') {
+      this.tone(300, 0.22, 'sine', 0.06, 0, 720);
+      this.tone(900, 0.3, 'sine', 0.03, 0.08, 420);
     } else if (name === 'phase') {
       this.tone(620, 0.4, 'sine', 0.04, 0, 180);
     } else if (name === 'over') {
@@ -1468,7 +1502,63 @@ export class GameEngine {
       if (o.kind === 'rock' || o.kind === 'coral') this.drawRock(o);
       else if (o.kind === 'mine') this.drawMine(o);
       else if (o.kind === 'jelly') this.drawJelly(o);
+      // 危险标识：让“会撞伤人的敌人”和背景热带鱼一眼区分。
+      this.drawDangerMarker(o);
     }
+  }
+
+  drawDangerMarker(o) {
+    const { ctx } = this;
+    let mx;
+    let my;
+    let rx;
+    let ry;
+    let rw;
+    let rh;
+    if (o.kind === 'rock') {
+      mx = o.x + o.w / 2;
+      my = o.side === 'top' ? o.h - Math.min(26, o.h * 0.32) : this.h - o.h + Math.min(26, o.h * 0.32);
+      rx = o.x - 5;
+      ry = o.y - 5;
+      rw = o.w + 10;
+      rh = o.h + 10;
+    } else {
+      mx = o.x;
+      my = o.y - o.r - 16;
+      rx = o.x;
+      ry = o.y;
+      rw = (o.r || 16) + 10;
+      rh = (o.r || 16) + 10;
+    }
+
+    const pulse = 0.55 + 0.35 * Math.sin(this.time * 5 + (o.seed || o.phase || 0));
+    const s = clamp(Math.min(this.w, this.h) * 0.034, 10, 17);
+    ctx.save();
+    ctx.globalAlpha = clamp(pulse + 0.15, 0.4, 1);
+    ctx.shadowColor = '#ff3b30';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#ff4a3d';
+    ctx.beginPath();
+    ctx.arc(mx, my, s * 0.62, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `900 ${Math.round(s)}px "Arial Rounded MT Bold", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('!', mx, my + 1);
+
+    ctx.strokeStyle = `rgba(255,82,62,${pulse})`;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 5]);
+    if (o.kind === 'rock') {
+      ctx.strokeRect(rx, ry, rw, rh);
+    } else {
+      ctx.beginPath();
+      ctx.arc(rx, ry, rw, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawRock(o) {
@@ -1503,9 +1593,12 @@ export class GameEngine {
     }
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = 'rgba(160,205,220,0.12)';
-    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(255,68,50,0.75)';
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = 'rgba(255,92,64,0.75)';
+    ctx.lineWidth = 3;
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
     // 藤壶/珊瑚点
     for (let i = 0; i < 6; i++) {
@@ -1528,9 +1621,12 @@ export class GameEngine {
     ctx.beginPath();
     ctx.arc(0, 0, o.r, 0, TAU);
     ctx.fill();
-    ctx.strokeStyle = '#526a73';
+    ctx.shadowColor = '#ff3b30';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = '#ff4a3d';
     ctx.lineWidth = 3;
     ctx.stroke();
+    ctx.shadowBlur = 0;
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * TAU + 0.4;
       ctx.beginPath();
@@ -1564,9 +1660,12 @@ export class GameEngine {
     ctx.quadraticCurveTo(-r * 0.4, r * 0.7, -r, 0);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,205,240,0.5)';
-    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(255,60,90,0.8)';
+    ctx.shadowBlur = 12;
+    ctx.strokeStyle = 'rgba(255,92,120,0.85)';
+    ctx.lineWidth = 2.5;
     ctx.stroke();
+    ctx.shadowBlur = 0;
     // 触手
     ctx.lineWidth = 2;
     for (let i = -2; i <= 2; i++) {
@@ -1647,12 +1746,77 @@ export class GameEngine {
     if (this.phaseTimer > 0) alpha = 0.52;
     else if (this.invuln > 0) alpha = 0.45 + 0.3 * Math.sin(this.time * 26);
     this.drawSharkShape(x, y, angle, alpha);
+    this.drawBubbleShield(x, y, this.playerR * 2.3);
+  }
+
+  drawBubbleShield(x, y, r) {
+    if (this.bubbleTimer <= 0 || !this.shark) return;
+    const { ctx } = this;
+    const pulse = 1 + Math.sin(this.time * 5.5) * 0.05;
+    const alpha = clamp(this.bubbleTimer / 0.5, 0, 1);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.shadowColor = '#9fe8ff';
+    ctx.shadowBlur = 18;
+    ctx.strokeStyle = 'rgba(170,235,255,0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * pulse, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(220,250,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.14 * pulse, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(210,248,255,0.28)';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * pulse, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawPlayableFishShape(x, y, angle, alpha, shark) {
+    const { ctx, h } = this;
+    const species = TROPICAL_FISH_SPECIES.find((item) => item.id === shark.speciesId);
+    if (!species) return;
+    const L = clamp(h * 0.16, 66, 122) * (shark.stats.size / 100);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.globalAlpha = alpha;
+
+    // 玩家鱼的呼吸光边：和背景鱼明显区分。
+    if (this.dashTimer > 0 || this.phaseTimer > 0) {
+      ctx.shadowColor = shark.colors.glow;
+      ctx.shadowBlur = this.phaseTimer > 0 ? 20 : 12;
+    }
+    ctx.strokeStyle = 'rgba(190,242,255,0.8)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, L * 0.46, L * 0.58, 0, 0, TAU);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    const fish = {
+      species,
+      dir: 1,
+      length: L,
+      phase: this.time * 2.8,
+      alpha,
+    };
+    this.drawTropicalFishShape(fish);
+    ctx.restore();
   }
 
   drawSharkShape(x, y, angle, alpha) {
     const { ctx, h } = this;
     const shark = this.shark;
     if (!shark) return;
+    if (shark.isTropicalFish) {
+      this.drawPlayableFishShape(x, y, angle, alpha, shark);
+      return;
+    }
     const sizeScale = shark.stats.size / 100;
     const L = clamp(h * 0.17, 82, 148) * sizeScale;
     const bodyH = L * 0.38;

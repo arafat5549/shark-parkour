@@ -63,6 +63,7 @@ export default function App() {
   useEffect(() => {
     const engine = new GameEngine(canvasRef.current, { onGameOver: handleGameOver });
     engine.setMuted(loadMuted());
+    engine.setPreviewShark(loadSelectedShark());
     engineRef.current = engine;
     return () => {
       engine.destroy();
@@ -91,6 +92,7 @@ export default function App() {
     setSelected(shark);
     saveSelectedShark(shark.id);
     setBest(loadBest(shark.id));
+    engineRef.current?.setPreviewShark(shark);
     engineRef.current?.unlockAudio();
   };
 
@@ -187,10 +189,10 @@ export default function App() {
             <header className="menu-header">
               <div className="logo-mark" aria-hidden="true">🦈</div>
               <h1>海底鲨鱼跑酷</h1>
-              <p>选择鲨鱼类型 · 专属能力自动分配</p>
+              <p>选择鲨鱼 / 热带鱼 · 能力自动分配</p>
             </header>
 
-            <div className="shark-picker" role="listbox" aria-label="选择鲨鱼类型">
+            <div className="shark-picker" role="listbox" aria-label="选择鲨鱼或热带鱼">
               {SHARKS.map((shark) => {
                 const active = selected.id === shark.id;
                 return (

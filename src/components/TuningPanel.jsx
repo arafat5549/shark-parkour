@@ -79,8 +79,15 @@ const FISH_ROWS = [
   },
 ];
 
+const ORIENTATIONS = [
+  { key: 'auto', label: '自动', hint: '检测到手机建议横屏' },
+  { key: 'portrait', label: '竖屏', hint: '始终保持竖屏' },
+  { key: 'landscape', label: '横屏', hint: '进入游戏时引导横屏' },
+];
+
 export default function TuningPanel({ onClose }) {
   const [values, setValues] = useState(() => ({
+    orientation: GAME_TUNING.orientation,
     gravity: GAME_TUNING.gravity,
     maxSinkSpeed: GAME_TUNING.maxSinkSpeed,
     lift: GAME_TUNING.lift,
@@ -104,6 +111,7 @@ export default function TuningPanel({ onClose }) {
   const handleReset = () => {
     resetTuning();
     setValues({
+      orientation: DEFAULT_GAME_TUNING.orientation,
       gravity: DEFAULT_GAME_TUNING.gravity,
       maxSinkSpeed: DEFAULT_GAME_TUNING.maxSinkSpeed,
       lift: DEFAULT_GAME_TUNING.lift,
@@ -127,6 +135,27 @@ export default function TuningPanel({ onClose }) {
         </div>
         <p className="tuning-note">
           对应源码文件 <code>src/game/config.js</code>，这里修改后无需重新构建，立即生效。
+        </p>
+
+        <div className="tuning-section-title">📱 屏幕方向</div>
+        <div className="orientation-picker">
+          {ORIENTATIONS.map((item) => (
+            <button
+              type="button"
+              key={item.key}
+              className={`orientation-option ${values.orientation === item.key ? 'active' : ''}`}
+              onClick={() => {
+                setValues((old) => ({ ...old, orientation: item.key }));
+                updateTuning({ orientation: item.key });
+              }}
+            >
+              <b>{item.label}</b>
+              <small>{item.hint}</small>
+            </button>
+          ))}
+        </div>
+        <p className="tuning-note orientation-note">
+          选择“横屏”后，进入游戏时会自动请求横屏；如果系统锁定竖屏，游戏会显示旋转提示。
         </p>
 
         <div className="tuning-section-title">🦈 鲨鱼升降手感</div>

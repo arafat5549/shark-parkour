@@ -786,3 +786,70 @@ button {
     padding: 14px 12px 12px;
   }
 }
+
+/* ---------------- 屏幕方向选择 ---------------- */
+.orientation-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.orientation-option {
+  min-height: 64px;
+  padding: 9px 6px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: rgba(0, 110, 170, 0.07);
+  border: 1px solid rgba(130, 210, 240, 0.12);
+  color: var(--muted);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.orientation-option b {
+  font-size: 14px;
+  color: inherit;
+}
+
+.orientation-option small {
+  font-size: 9.5px;
+  line-height: 1.2;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.orientation-option.active {
+  color: #eafaff;
+  background: rgba(70, 180, 225, 0.16);
+  border-color: #59c6f2;
+  box-shadow: 0 0 14px rgba(80, 200, 245, 0.18);
+}
+
+.orientation-note {
+  margin-bottom: 4px !important;
+}
+
+/* ---------------- 旋转手机提示 ---------------- */
+.rotate-overlay {
+  z-index: 80;
+}
+
+.rotate-panel {
+  max-width: 360px;
+}
+
+.rotate-phone {
+  font-size: 52px;
+  line-height: 1;
+  animation: rotate-phone 1.6s ease-in-out infinite;
+}
+
+@keyframes rotate-phone {
+  0%, 100% { transform: rotate(0deg); }
+  45% { transform: rotate(90deg); }
+  70% { transform: rotate(90deg); }
+}

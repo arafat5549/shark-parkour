@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './game/GameEngine.js';
 import TuningPanel from './components/TuningPanel.jsx';
+import { GAME_TUNING } from './game/config.js';
 import {
   MAX_STAT_VALUES,
   SHARKS,
@@ -30,6 +31,38 @@ function saveMuted(muted) {
   }
 }
 
+function isPhoneDevice() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const mobileUA = /Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const touch = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
+  return mobileUA && touch;
+}
+
+function isLandscapeViewport() {
+  return window.innerWidth >= window.innerHeight;
+}
+
+function preferredOrientation() {
+  if (GAME_TUNING.orientation === 'auto') return isPhoneDevice() ? 'landscape' : 'any';
+  return GAME_TUNING.orientation;
+}
+
+async function requestLandscape() {
+  if (isLandscapeViewport()) return true;
+  const orientation = typeof screen !== 'undefined' ? screen.orientation : null;
+  if (!orientation || !orientation.lock) return false;
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    }
+    await orientation.lock('landscape');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const canvasRef = useRef(null);
   const engineRef = useRef(null);
@@ -42,6 +75,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenRef = useRef(false);
   const resumeAfterSettingsRef = useRef(false);
+  const [rotateHint, setRotateHint] = useState(false);
+  const rotateHintRef = useRef(false);
+  const rotatePausedRef = useRef(false);
 
   const setScreen = useCallback((next) => {
     screenRef.current = next;
@@ -73,7 +109,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (settingsOpenRef.current) return;
+      if (settingsOpenRef.current || rotateHintRef.current) return;
       if (e.code !== 'Escape' && e.code !== 'KeyP') return;
       const current = screenRef.current;
       if (current === 'playing') {
@@ -87,6 +123,51 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [setScreen]);
+
+  const resumeAfterRotateHint = useCallback(() => {
+    rotateHintRef.current = false;
+    setRotateHint(false);
+    if (rotatePausedRef.current) {
+      rotatePausedRef.current = false;
+      engineRef.current?.resume();
+      if (screenRef.current === 'paused') setScreen('playing');
+    }
+  }, [setScreen]);
+
+  const applyPreferredOrientation = useCallback(async () => {
+    const mode = preferredOrientation();
+    if (mode === 'landscape') {
+      await requestLandscape();
+      // 部分浏览器 lock() 会成功但系统旋转有延迟，稍等后再确认。
+      await new Promise((resolve) => setTimeout(resolve, 280));
+      if (!isLandscapeViewport()) {
+        rotatePausedRef.current = screenRef.current === 'playing';
+        engineRef.current?.pause();
+        if (screenRef.current === 'playing') setScreen('paused');
+        rotateHintRef.current = true;
+        setRotateHint(true);
+      }
+    } else if (mode === 'portrait') {
+      try {
+        screen.orientation?.unlock?.();
+      } catch {
+        // 忽略不支持的情况
+      }
+    }
+  }, [setScreen]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (rotateHintRef.current && isLandscapeViewport()) resumeAfterRotateHint();
+    };
+    const mql = window.matchMedia('(orientation: landscape)');
+    mql.addEventListener?.('change', refresh);
+    window.addEventListener('resize', refresh);
+    return () => {
+      mql.removeEventListener?.('change', refresh);
+      window.removeEventListener('resize', refresh);
+    };
+  }, [resumeAfterRotateHint]);
 
   const chooseShark = (shark) => {
     setSelected(shark);
@@ -102,6 +183,7 @@ export default function App() {
     engineRef.current?.unlockAudio();
     engineRef.current?.startGame(shark);
     setScreen('playing');
+    void applyPreferredOrientation();
   };
 
   const pauseGame = () => {
@@ -154,6 +236,7 @@ export default function App() {
       engineRef.current?.resume();
       setScreen('playing');
     }
+    void applyPreferredOrientation();
   };
 
   const inGame = screen === 'playing' || screen === 'paused' || screen === 'gameover';
@@ -331,6 +414,29 @@ export default function App() {
             </div>
             <button type="button" className="primary-button" onClick={restartGame}>🦈 再游一次</button>
             <button type="button" className="ghost-button" onClick={backToMenu}>更换鲨鱼</button>
+          </div>
+        </div>
+      )}
+
+      {rotateHint && (
+        <div className="overlay rotate-overlay">
+          <div className="panel rotate-panel">
+            <div className="rotate-phone" aria-hidden="true">📱↻</div>
+            <h2>请旋转为横屏</h2>
+            <p>检测到手机并已开启横屏模式。<br />把手机横过来，游戏视野更宽。</p>
+            <button type="button" className="primary-button" onClick={resumeAfterRotateHint}>我已横屏，开始</button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                rotatePausedRef.current = false;
+                engineRef.current?.resume();
+                if (screenRef.current === 'paused') setScreen('playing');
+                resumeAfterRotateHint();
+              }}
+            >
+              暂不横屏，继续竖屏
+            </button>
           </div>
         </div>
       )}

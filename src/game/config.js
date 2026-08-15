@@ -3,6 +3,9 @@
 // =============================================================================
 
 export const GAME_TUNING = {
+  // 屏幕方向模式：auto = 检测到手机自动建议横屏；portrait = 竖屏；landscape = 横屏。
+  orientation: 'auto',
+
   // 基础前进速度（屏幕高度倍率/秒）
   baseSpeed: 0.42,
 
@@ -159,6 +162,8 @@ function applyPatch(target, patch) {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       applyPatch(target[key], value);
     } else if (typeof value === 'number' && Number.isFinite(value)) {
+      target[key] = value;
+    } else if (typeof value === 'string' || typeof value === 'boolean') {
       target[key] = value;
     }
   }

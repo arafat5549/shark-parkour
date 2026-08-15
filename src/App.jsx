@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './game/GameEngine.js';
+import TuningPanel from './components/TuningPanel.jsx';
 import {
   MAX_STAT_VALUES,
   SHARKS,
@@ -38,6 +39,9 @@ export default function App() {
   const [best, setBest] = useState(() => loadBest(loadSelectedShark().id));
   const [muted, setMutedState] = useState(() => loadMuted());
   const [result, setResult] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpenRef = useRef(false);
+  const resumeAfterSettingsRef = useRef(false);
 
   const setScreen = useCallback((next) => {
     screenRef.current = next;
@@ -68,6 +72,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (settingsOpenRef.current) return;
       if (e.code !== 'Escape' && e.code !== 'KeyP') return;
       const current = screenRef.current;
       if (current === 'playing') {
@@ -127,6 +132,28 @@ export default function App() {
     });
   };
 
+  const openSettings = (fromGame = false) => {
+    if (fromGame && screenRef.current === 'playing') {
+      engineRef.current?.pause();
+      setScreen('paused');
+      resumeAfterSettingsRef.current = true;
+    } else {
+      resumeAfterSettingsRef.current = false;
+    }
+    settingsOpenRef.current = true;
+    setSettingsOpen(true);
+  };
+
+  const closeSettings = () => {
+    settingsOpenRef.current = false;
+    setSettingsOpen(false);
+    if (resumeAfterSettingsRef.current) {
+      resumeAfterSettingsRef.current = false;
+      engineRef.current?.resume();
+      setScreen('playing');
+    }
+  };
+
   const inGame = screen === 'playing' || screen === 'paused' || screen === 'gameover';
 
   return (
@@ -135,6 +162,9 @@ export default function App() {
 
       {inGame && (
         <div className="game-topbar">
+          <button type="button" className="icon-button" onClick={() => openSettings(true)} aria-label="游戏参数调节">
+            ⚙️
+          </button>
           <button
             type="button"
             className={`icon-button ${muted ? 'is-off' : ''}`}
@@ -262,6 +292,9 @@ export default function App() {
               </p>
             </div>
           </div>
+          <button type="button" className="floating-settings" onClick={() => openSettings(false)} aria-label="游戏参数调节">
+            ⚙️ 参数
+          </button>
           <button type="button" className={`floating-mute ${muted ? 'is-off' : ''}`} onClick={toggleMute} aria-label="声音开关">
             {muted ? '🔇' : '🔊'}
           </button>
@@ -299,6 +332,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {settingsOpen && <TuningPanel onClose={closeSettings} />}
     </div>
   );
 }

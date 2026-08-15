@@ -34,18 +34,18 @@ export const GAME_TUNING = {
   // ---------------- 热带鱼装饰 ----------------
   tropicalFish: {
     enabled: true,
-    // 鱼群密度：1 为默认，调到 1.4 ~ 1.8 鱼会明显更多。
-    density: 1.0,
-    minFish: 6,
-    maxFish: 20,
+    // 鱼群密度：1 为默认，调到 1.6 ~ 2.2 鱼会更多、更明显。
+    density: 1.6,
+    minFish: 10,
+    maxFish: 32,
     // 屏幕面积 ÷ 该值 = 基础鱼数量。
-    areaDivisor: 42000,
+    areaDivisor: 30000,
     // 游动速度范围（屏幕高度倍率/秒）。
-    speedMin: 0.055,
-    speedMax: 0.16,
-    // 透明度范围。
-    alphaMin: 0.34,
-    alphaMax: 0.85,
+    speedMin: 0.05,
+    speedMax: 0.13,
+    // 透明度范围（数值越大越显眼）。
+    alphaMin: 0.6,
+    alphaMax: 0.95,
   },
 };
 
@@ -64,7 +64,7 @@ export const TROPICAL_FISH_SPECIES = [
     pattern: 'bands',
     bands: 3,
     spot: '#33241d',
-    length: [0.024, 0.038],
+    length: [0.036, 0.056],
   },
   {
     id: 'blue-tang',
@@ -79,7 +79,7 @@ export const TROPICAL_FISH_SPECIES = [
     pattern: 'curve',
     bands: 1,
     spot: '#0e1f3d',
-    length: [0.026, 0.04],
+    length: [0.038, 0.06],
   },
   {
     id: 'yellow-tang',
@@ -94,7 +94,7 @@ export const TROPICAL_FISH_SPECIES = [
     pattern: 'plain',
     bands: 0,
     spot: '#26210d',
-    length: [0.025, 0.04],
+    length: [0.036, 0.058],
   },
   {
     id: 'emperor-angelfish',
@@ -109,7 +109,7 @@ export const TROPICAL_FISH_SPECIES = [
     pattern: 'stripes',
     bands: 5,
     spot: '#101d3d',
-    length: [0.03, 0.045],
+    length: [0.044, 0.07],
   },
   {
     id: 'butterflyfish',
@@ -124,7 +124,7 @@ export const TROPICAL_FISH_SPECIES = [
     pattern: 'eyespot',
     bands: 1,
     spot: '#242112',
-    length: [0.024, 0.038],
+    length: [0.034, 0.056],
   },
   {
     id: 'mandarinfish',
@@ -139,6 +139,57 @@ export const TROPICAL_FISH_SPECIES = [
     pattern: 'wavy',
     bands: 4,
     spot: '#0f2b2e',
-    length: [0.02, 0.032],
+    length: [0.03, 0.048],
   },
 ];
+
+// -----------------------------------------------------------------------------
+// 参数持久化与运行时调整（设置面板直接修改这里的值，立即生效）
+// -----------------------------------------------------------------------------
+
+const TUNING_STORAGE_KEY = 'shark-parkour.tuning.v1';
+
+export const DEFAULT_GAME_TUNING = JSON.parse(JSON.stringify(GAME_TUNING));
+
+function applyPatch(target, patch) {
+  if (!patch || typeof patch !== 'object') return;
+  for (const key of Object.keys(target)) {
+    if (!(key in patch)) continue;
+    const value = patch[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      applyPatch(target[key], value);
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      target[key] = value;
+    }
+  }
+}
+
+export function updateTuning(patch) {
+  applyPatch(GAME_TUNING, patch);
+  try {
+    localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(GAME_TUNING));
+  } catch {
+    // 隐私模式下忽略持久化失败，参数仍会在当前页面生效。
+  }
+}
+
+export function resetTuning() {
+  applyPatch(GAME_TUNING, DEFAULT_GAME_TUNING);
+  try {
+    localStorage.removeItem(TUNING_STORAGE_KEY);
+  } catch {
+    // 忽略
+  }
+}
+
+export function loadTuning() {
+  try {
+    const saved = localStorage.getItem(TUNING_STORAGE_KEY);
+    if (saved) applyPatch(GAME_TUNING, JSON.parse(saved));
+  } catch {
+    // 无 localStorage 或数据损坏时使用默认值
+  }
+}
+
+// 模块加载时恢复本机保存的参数。
+loadTuning();

@@ -865,9 +865,25 @@ export class GameEngine {
 
   initTropicalFish() {
     this.fish = [];
-    const desired = this.desiredFishCount();
-    for (let i = 0; i < desired; i++) {
-      this.fish.push(this.makeTropicalFish(true));
+    let desired = this.desiredFishCount();
+    // 按 2~4 条的小鱼群生成，同群品种一致，视觉上更明显。
+    while (this.fish.length < desired) {
+      const species = TROPICAL_FISH_SPECIES[Math.floor(Math.random() * TROPICAL_FISH_SPECIES.length)];
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const layer = Math.random() < 0.52 ? rand(0.15, 0.5) : rand(0.55, 0.95);
+      const schoolSize = Math.min(desired - this.fish.length, 2 + Math.floor(Math.random() * 3));
+      const baseLength = rand(species.length[0], species.length[1]) * this.h;
+      const baseX = rand(0, this.w);
+      const baseY = this.randomFishY(baseLength);
+      for (let i = 0; i < schoolSize; i++) {
+        const f = this.makeTropicalFish(true, species, dir, layer);
+        f.length = baseLength * rand(0.85, 1.2);
+        f.x = baseX + i * f.length * rand(1.6, 2.1);
+        f.baseY = clamp(baseY + rand(-f.length * 1.1, f.length * 1.1), this.safe.top + 30 + f.length * 0.5, this.floorY() - f.length * 0.7);
+        f.y = f.baseY;
+        f.bobAmp = rand(3, 11) * (0.5 + layer * 0.5);
+        this.fish.push(f);
+      }
     }
   }
 
@@ -877,30 +893,30 @@ export class GameEngine {
     return Math.floor(clamp(count, cfg.minFish, cfg.maxFish));
   }
 
-  makeTropicalFish(anywhere = false) {
+  makeTropicalFish(anywhere = false, species = null, dir = null, layer = null) {
     const cfg = GAME_TUNING.tropicalFish;
-    const species = TROPICAL_FISH_SPECIES[Math.floor(Math.random() * TROPICAL_FISH_SPECIES.length)];
+    const chosen = species || TROPICAL_FISH_SPECIES[Math.floor(Math.random() * TROPICAL_FISH_SPECIES.length)];
     const h = this.h;
-    const layer = rand(0.12, 0.95);
-    const length = rand(species.length[0], species.length[1]) * h;
-    const dir = Math.random() < 0.5 ? -1 : 1;
-    const speed = h * lerp(cfg.speedMin, cfg.speedMax, layer);
+    const fishLayer = layer ?? rand(0.12, 0.95);
+    const length = rand(chosen.length[0], chosen.length[1]) * h;
+    const fishDir = dir ?? (Math.random() < 0.5 ? -1 : 1);
+    const speed = h * lerp(cfg.speedMin, cfg.speedMax, fishLayer);
     const top = 30 + this.safe.top;
     const bottom = this.floorY() - length * 0.7;
     const y = rand(top + length * 0.5, Math.max(top + length * 0.6, bottom));
     return {
-      species,
-      x: anywhere ? rand(-length, this.w + length) : (dir > 0 ? -length * 1.6 : this.w + length * 1.6),
+      species: chosen,
+      x: anywhere ? rand(-length, this.w + length) : (fishDir > 0 ? -length * 1.6 : this.w + length * 1.6),
       baseY: y,
       y,
-      dir,
+      dir: fishDir,
       length,
-      layer,
+      layer: fishLayer,
       speed,
       phase: rand(0, TAU),
       wobble: rand(0.7, 1.8),
-      bobAmp: rand(3, 12) * (0.35 + layer * 0.65),
-      alpha: lerp(cfg.alphaMin, cfg.alphaMax, layer),
+      bobAmp: rand(3, 12) * (0.35 + fishLayer * 0.65),
+      alpha: lerp(cfg.alphaMin, cfg.alphaMax, fishLayer),
     };
   }
 
@@ -916,6 +932,10 @@ export class GameEngine {
 
     for (let i = this.fish.length - 1; i >= 0; i--) {
       const f = this.fish[i];
+      // 参数面板修改速度/清晰度时，让现有鱼也平滑跟随新参数。
+      const targetSpeed = this.h * lerp(cfg.speedMin, cfg.speedMax, f.layer);
+      f.speed += (targetSpeed - f.speed) * Math.min(1, dt * 2.2);
+      f.alpha = lerp(cfg.alphaMin, cfg.alphaMax, f.layer);
       f.x += f.dir * f.speed * dt;
       f.phase += f.wobble * dt;
       f.y = f.baseY + Math.sin(f.phase) * f.bobAmp;

@@ -36,14 +36,16 @@ https://arafat5549.github.io/shark-parkour/
 ```js
 tropicalFish: {
   enabled: true,
-  density: 1.0, // 调到 1.4 ~ 1.8 鱼会更多
-  minFish: 6,
-  maxFish: 20,
-  areaDivisor: 42000,
-  speedMin: 0.055,
-  speedMax: 0.16,
+  density: 1.6, // 游戏内参数面板可实时调节：0~2.5
+  minFish: 10,
+  maxFish: 32,
+  areaDivisor: 30000,
+  speedMin: 0.05,
+  speedMax: 0.13,
 }
 ```
+
+> 游戏菜单左上角和游戏内右上角都有 **⚙️ 参数** 按钮，可实时调整并自动保存在手机浏览器中，无需修改代码。
 
 ## 下沉速度调参
 

@@ -1,5 +1,6 @@
 /* eslint-disable no-mixed-operators */
 // 深海鲨鱼跑酷：Canvas 2D 引擎。所有图形均为程序化绘制，无外部素材，可离线运行。
+import { GAME_TUNING, TROPICAL_FISH_SPECIES } from './config.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -31,6 +32,7 @@ export class GameEngine {
     this.dpr = 1;
 
     this.bubbles = [];
+    this.fish = [];
     this.rings = [];
     this.flashes = [];
     this.floatTexts = [];
@@ -70,6 +72,9 @@ export class GameEngine {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
+
+    // 屏幕尺寸/方向变化后，按新尺寸重新布鱼。
+    if (Array.isArray(this.fish) && this.fish.length) this.initTropicalFish();
   }
 
   bindEvents() {
@@ -298,6 +303,7 @@ export class GameEngine {
       this.updateAmbient(dt);
     } else if (this.state === 'over') {
       this.updateParticles(dt);
+      this.updateTropicalFish(dt);
     }
     this.draw();
     this.raf = requestAnimationFrame(this.tick);
@@ -305,6 +311,7 @@ export class GameEngine {
 
   updateAmbient(dt) {
     this.updateBubbles(dt);
+    this.updateTropicalFish(dt);
     this.updateParticles(dt);
     this.updateRings(dt);
     for (let i = this.floatTexts.length - 1; i >= 0; i--) {
@@ -318,9 +325,10 @@ export class GameEngine {
     const shark = this.shark;
     const h = this.h;
 
-    // 速度与难度
-    const base = h * 0.42;
-    const ramp = Math.min(0.78, this.distance / (h * 13));
+    // 速度与难度（系数见 src/game/config.js）
+    const tuning = GAME_TUNING;
+    const base = h * tuning.baseSpeed;
+    const ramp = Math.min(tuning.maxSpeedRamp, this.distance / (h * tuning.speedRampDistanceDivisor));
     const diff = clamp(this.distance / (h * 34), 0, 1);
     let speed = base * (1 + ramp) * (shark.stats.speed / 100);
     if (this.dashTimer > 0) speed *= 1.8;
@@ -328,18 +336,19 @@ export class GameEngine {
     this.distance += speed * dt;
     this.score = Math.floor(this.distance / 10) + this.pearlScore;
 
-    // 玩家物理：按住上浮，松开下潜；S/下方向可主动下潜
+    // 玩家物理：按住上浮，松开下潜；S/下方向可主动下潜。
+    // gravity / lift / dive / drag / maxSinkSpeed 均为 config.js 中可调系数。
     const agility = shark.stats.agility / 100;
-    const lift = h * 3.35 * agility;
-    const gravity = h * 2.75;
-    const dive = h * 4.6 * agility;
+    const lift = h * tuning.lift * agility;
+    const gravity = h * tuning.gravity;
+    const dive = h * tuning.dive * agility;
     let acc = gravity;
     if (this.input.up) acc -= lift;
     if (this.input.down) acc += dive;
     this.vy += acc * dt;
-    this.vy -= this.vy * 2.15 * dt;
-    const maxUp = h * 1.05;
-    const maxDown = h * 0.88;
+    this.vy -= this.vy * tuning.drag * dt;
+    const maxUp = h * tuning.maxRiseSpeed;
+    const maxDown = h * tuning.maxSinkSpeed;
     this.vy = clamp(this.vy, -maxUp, maxDown);
     this.playerY += this.vy * dt;
     const topLimit = 26 + this.safe.top + this.playerR;
@@ -378,6 +387,7 @@ export class GameEngine {
 
     // 粒子/特效
     this.updateBubbles(dt);
+    this.updateTropicalFish(dt);
     this.updateParticles(dt);
     this.updateRings(dt);
     for (let i = this.floatTexts.length - 1; i >= 0; i--) {
@@ -850,6 +860,80 @@ export class GameEngine {
     for (let i = 0; i < count; i++) {
       this.bubbles.push(this.makeBubble(true));
     }
+    this.initTropicalFish();
+  }
+
+  initTropicalFish() {
+    this.fish = [];
+    const desired = this.desiredFishCount();
+    for (let i = 0; i < desired; i++) {
+      this.fish.push(this.makeTropicalFish(true));
+    }
+  }
+
+  desiredFishCount() {
+    const cfg = GAME_TUNING.tropicalFish;
+    const count = Math.round(((this.w * this.h) / cfg.areaDivisor) * cfg.density);
+    return Math.floor(clamp(count, cfg.minFish, cfg.maxFish));
+  }
+
+  makeTropicalFish(anywhere = false) {
+    const cfg = GAME_TUNING.tropicalFish;
+    const species = TROPICAL_FISH_SPECIES[Math.floor(Math.random() * TROPICAL_FISH_SPECIES.length)];
+    const h = this.h;
+    const layer = rand(0.12, 0.95);
+    const length = rand(species.length[0], species.length[1]) * h;
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    const speed = h * lerp(cfg.speedMin, cfg.speedMax, layer);
+    const top = 30 + this.safe.top;
+    const bottom = this.floorY() - length * 0.7;
+    const y = rand(top + length * 0.5, Math.max(top + length * 0.6, bottom));
+    return {
+      species,
+      x: anywhere ? rand(-length, this.w + length) : (dir > 0 ? -length * 1.6 : this.w + length * 1.6),
+      baseY: y,
+      y,
+      dir,
+      length,
+      layer,
+      speed,
+      phase: rand(0, TAU),
+      wobble: rand(0.7, 1.8),
+      bobAmp: rand(3, 12) * (0.35 + layer * 0.65),
+      alpha: lerp(cfg.alphaMin, cfg.alphaMax, layer),
+    };
+  }
+
+  updateTropicalFish(dt) {
+    const cfg = GAME_TUNING.tropicalFish;
+    if (!cfg.enabled) {
+      if (this.fish.length) this.fish = [];
+      return;
+    }
+    const desired = this.desiredFishCount();
+    while (this.fish.length < desired) this.fish.push(this.makeTropicalFish(false));
+    while (this.fish.length > desired) this.fish.pop();
+
+    for (let i = this.fish.length - 1; i >= 0; i--) {
+      const f = this.fish[i];
+      f.x += f.dir * f.speed * dt;
+      f.phase += f.wobble * dt;
+      f.y = f.baseY + Math.sin(f.phase) * f.bobAmp;
+      const margin = f.length * 1.8;
+      if (f.dir > 0 && f.x > this.w + margin) {
+        f.x = -margin;
+        f.baseY = this.randomFishY(f.length);
+      } else if (f.dir < 0 && f.x < -margin) {
+        f.x = this.w + margin;
+        f.baseY = this.randomFishY(f.length);
+      }
+    }
+  }
+
+  randomFishY(length = 20) {
+    const top = 30 + this.safe.top + length * 0.5;
+    const bottom = this.floorY() - length * 0.7;
+    return rand(top, Math.max(top + 2, bottom));
   }
 
   makeBubble(anywhere = false) {
@@ -996,11 +1080,15 @@ export class GameEngine {
     }
     this.drawBackground();
     if (this.state !== 'idle') {
+      this.drawTropicalFish('far');
       this.drawHazards();
       this.drawPickups();
+      this.drawTropicalFish('near');
       this.drawShark();
     } else {
+      this.drawTropicalFish('far');
       this.drawAmbientShark();
+      this.drawTropicalFish('near');
     }
     this.drawParticles();
     this.drawRings();
@@ -1152,6 +1240,170 @@ export class GameEngine {
       ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.3, 0, TAU);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  drawTropicalFish(layer = null) {
+    if (!GAME_TUNING.tropicalFish.enabled || !this.fish.length) return;
+    const { ctx } = this;
+    ctx.save();
+    for (const f of this.fish) {
+      if (layer === 'far' && f.layer >= 0.55) continue;
+      if (layer === 'near' && f.layer < 0.55) continue;
+      this.drawTropicalFishShape(f);
+    }
+    ctx.restore();
+  }
+
+  drawTropicalFishShape(f) {
+    const { ctx } = this;
+    const s = f.species;
+    const L = f.length;
+    if (L <= 0) return;
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.scale(f.dir, 1);
+    ctx.globalAlpha = f.alpha;
+    ctx.lineJoin = 'round';
+
+    // 尾鳍
+    const tailWave = Math.sin(f.phase * 2.1) * L * 0.07;
+    ctx.fillStyle = s.tail;
+    ctx.beginPath();
+    ctx.moveTo(-L * 0.24, -L * 0.04 + tailWave);
+    ctx.lineTo(-L * 0.48, -L * 0.22 + tailWave);
+    ctx.lineTo(-L * 0.42, 0);
+    ctx.lineTo(-L * 0.48, L * 0.22 - tailWave);
+    ctx.lineTo(-L * 0.24, L * 0.04 + tailWave);
+    ctx.closePath();
+    ctx.fill();
+
+    // 身体
+    ctx.fillStyle = s.body;
+    ctx.strokeStyle = s.dark;
+    ctx.lineWidth = Math.max(1, L * 0.03);
+    ctx.beginPath();
+    if (s.shape === 'disc') {
+      ctx.ellipse(0, 0, L * 0.29, L * 0.4, 0, 0, TAU);
+    } else if (s.shape === 'angelfish') {
+      ctx.moveTo(L * 0.4, -L * 0.05);
+      ctx.quadraticCurveTo(L * 0.1, -L * 0.48, -L * 0.18, -L * 0.34);
+      ctx.quadraticCurveTo(-L * 0.34, -L * 0.18, -L * 0.32, 0);
+      ctx.quadraticCurveTo(-L * 0.34, L * 0.18, -L * 0.18, L * 0.34);
+      ctx.quadraticCurveTo(L * 0.1, L * 0.48, L * 0.4, L * 0.05);
+    } else if (s.shape === 'goby') {
+      ctx.ellipse(L * 0.04, 0, L * 0.31, L * 0.14, 0, 0, TAU);
+    } else {
+      ctx.ellipse(0, 0, L * 0.33, L * 0.2, 0, 0, TAU);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 背鳍/腹鳍
+    ctx.fillStyle = s.fin;
+    if (s.shape === 'disc') {
+      ctx.beginPath();
+      ctx.moveTo(-L * 0.2, -L * 0.36);
+      ctx.quadraticCurveTo(0, -L * 0.62, L * 0.24, -L * 0.3);
+      ctx.closePath();
+      ctx.fill();
+    } else if (s.shape === 'angelfish') {
+      ctx.beginPath();
+      ctx.moveTo(-L * 0.02, -L * 0.38);
+      ctx.quadraticCurveTo(L * 0.08, -L * 0.54, L * 0.24, -L * 0.3);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(-L * 0.08, -L * 0.17);
+      ctx.quadraticCurveTo(0, -L * 0.34, L * 0.16, -L * 0.14);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 花纹（先按身体轮廓裁剪，再绘制条纹/斑点）
+    ctx.save();
+    ctx.beginPath();
+    if (s.shape === 'disc' || s.shape === 'angelfish') {
+      ctx.ellipse(0, 0, L * 0.29, L * 0.4, 0, 0, TAU);
+    } else if (s.shape === 'goby') {
+      ctx.ellipse(L * 0.04, 0, L * 0.31, L * 0.14, 0, 0, TAU);
+    } else {
+      ctx.ellipse(0, 0, L * 0.33, L * 0.2, 0, 0, TAU);
+    }
+    ctx.clip();
+
+    if (s.pattern === 'bands') {
+      ctx.strokeStyle = s.stripe;
+      ctx.lineWidth = Math.max(1.5, L * 0.06);
+      for (let i = 0; i < s.bands; i++) {
+        const x = L * 0.24 - i * L * 0.16;
+        ctx.beginPath();
+        ctx.moveTo(x, -L * 0.34);
+        ctx.lineTo(x, L * 0.34);
+        ctx.stroke();
+      }
+    } else if (s.pattern === 'stripes') {
+      ctx.strokeStyle = s.stripe;
+      ctx.lineWidth = Math.max(1.4, L * 0.045);
+      for (let i = 0; i < s.bands; i++) {
+        const x = L * 0.28 - i * L * 0.12;
+        ctx.beginPath();
+        ctx.moveTo(x, -L * 0.4);
+        ctx.quadraticCurveTo(x + L * 0.03, 0, x, L * 0.4);
+        ctx.stroke();
+      }
+    } else if (s.pattern === 'curve') {
+      ctx.strokeStyle = s.stripe;
+      ctx.lineWidth = Math.max(1.5, L * 0.055);
+      ctx.beginPath();
+      ctx.arc(L * 0.02, -L * 0.02, L * 0.18, Math.PI * 0.78, Math.PI * 1.55);
+      ctx.stroke();
+    } else if (s.pattern === 'wavy') {
+      ctx.strokeStyle = s.stripe;
+      ctx.lineWidth = Math.max(1.2, L * 0.04);
+      for (let i = 0; i < s.bands; i++) {
+        const x = L * 0.22 - i * L * 0.12;
+        ctx.beginPath();
+        for (let yy = -L * 0.22; yy <= L * 0.22; yy += L * 0.08) {
+          const xx = x + Math.sin((yy / L) * 7 + i) * L * 0.035;
+          if (yy === -L * 0.22) ctx.moveTo(xx, yy);
+          else ctx.lineTo(xx, yy);
+        }
+        ctx.stroke();
+      }
+    } else if (s.pattern === 'eyespot') {
+      ctx.fillStyle = s.dark;
+      ctx.beginPath();
+      ctx.arc(-L * 0.24, -L * 0.05, L * 0.07, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = s.stripe;
+      ctx.lineWidth = Math.max(1, L * 0.025);
+      ctx.beginPath();
+      ctx.arc(-L * 0.24, -L * 0.05, L * 0.09, 0, TAU);
+      ctx.stroke();
+    }
+
+    // 腹部提亮
+    ctx.fillStyle = s.belly;
+    ctx.globalAlpha = f.alpha * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(L * 0.04, L * 0.11, L * 0.2, L * 0.07, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = f.alpha;
+
+    // 眼睛
+    ctx.fillStyle = s.spot;
+    ctx.beginPath();
+    ctx.arc(L * 0.21, -L * 0.06, Math.max(1.2, L * 0.032), 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.arc(L * 0.22, -L * 0.075, Math.max(0.6, L * 0.012), 0, TAU);
+    ctx.fill();
+
     ctx.restore();
   }
 

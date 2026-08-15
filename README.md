@@ -27,6 +27,39 @@ https://arafat5549.github.io/shark-parkour/
 - ⌨️ 电脑：`空格 / W / ↑` 上浮，`S / ↓` 下潜，`X / Shift / J` 释放能力
 - `Esc / P` 暂停
 
+## 热带鱼装饰
+
+海底会随机出现 6 种热带鱼：小丑鱼、蓝倒吊、黄高鳍刺尾鱼、皇帝神仙鱼、蝴蝶鱼、七彩麒麟鱼，并区分远景/近景鱼群。
+
+鱼群数量与游动速度可在 `src/game/config.js` 中调整：
+
+```js
+tropicalFish: {
+  enabled: true,
+  density: 1.0, // 调到 1.4 ~ 1.8 鱼会更多
+  minFish: 6,
+  maxFish: 20,
+  areaDivisor: 42000,
+  speedMin: 0.055,
+  speedMax: 0.16,
+}
+```
+
+## 下沉速度调参
+
+当前默认已把下沉调慢。所有升降手感参数集中在 `src/game/config.js`：
+
+```js
+gravity: 1.45,       // 下沉重力系数：越小下沉越慢
+lift: 4.8,           // 按住上浮力度：越大上升越快
+dive: 4.6,           // 主动下潜力度
+drag: 2.2,           // 水阻：越大越跟手
+maxSinkSpeed: 0.62,  // 最大下沉速度（屏幕高度倍率/秒）
+maxRiseSpeed: 1.02,  // 最大上浮速度
+```
+
+例如想让下沉更慢，把 `gravity` 改为 `1.15`、`maxSinkSpeed` 改为 `0.5` 即可。
+
 ## 开发
 
 ```bash

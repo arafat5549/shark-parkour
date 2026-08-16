@@ -1,6 +1,7 @@
 /* eslint-disable no-mixed-operators */
 // 深海鲨鱼跑酷：Canvas 2D 引擎。所有图形均为程序化绘制，无外部素材，可离线运行。
 import { GAME_TUNING, TROPICAL_FISH_SPECIES } from './config.js';
+import { getShieldDef, loadShopState } from './shop.js';
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -33,6 +34,8 @@ export class GameEngine {
 
     this.bubbles = [];
     this.fish = [];
+    this.bullets = [];
+    this.shop = loadShopState();
     this.rings = [];
     this.flashes = [];
     this.floatTexts = [];
@@ -126,6 +129,11 @@ export class GameEngine {
     this.muted = muted;
   }
 
+  setShopState(shop) {
+    this.shop = shop || loadShopState();
+    if (this.state === 'idle') this.initTropicalFish();
+  }
+
   unlockAudio() {
     if (!this.audio) {
       try {
@@ -145,9 +153,13 @@ export class GameEngine {
     this.distance = 0;
     this.pearls = 0;
     this.score = 0;
-    this.hearts = shark.stats.hearts;
-    this.maxHearts = shark.stats.hearts;
+    const lifeBonus = this.shop?.lifeBoosts?.[shark.id] || 0;
+    this.hearts = shark.stats.hearts + lifeBonus;
+    this.maxHearts = shark.stats.hearts + lifeBonus;
     this.pearlScore = 0;
+    this.shieldCharges = this.shop?.equippedShield ? (getShieldDef(this.shop.equippedShield)?.durability || 0) : 0;
+    this.gunCooldown = 1.5;
+    this.bullets = [];
     this.speed = 0;
     this.invuln = 0;
     this.hitFlash = 0;
@@ -379,6 +391,10 @@ export class GameEngine {
       this.abilityTimer -= dt;
       if (this.abilityTimer <= 0) this.abilityActive = null;
     }
+
+    // 武器系统
+    this.updateGun(dt);
+    this.updateBullets(dt);
 
     // 生成
     this.spawnTimer -= dt;
@@ -685,6 +701,18 @@ export class GameEngine {
 
   hitHazard(o) {
     const shark = this.shark;
+    // 装备的盾牌优先格挡，每次撞击消耗 1 点耐久。
+    if (this.shieldCharges > 0) {
+      this.shieldCharges -= 1;
+      const shieldDef = getShieldDef(this.shop?.equippedShield);
+      this.invuln = Math.max(this.invuln, 0.95);
+      this.shake = 0.35;
+      this.pushFloatText(`${shieldDef?.name || '盾牌'}格挡！`, shieldDef?.color || '#cfefff', o.x, o.y);
+      this.destroyHazard(o, shieldDef?.color || '#cfefff');
+      this.sound('block');
+      return;
+    }
+
     // 虎鲨被动：概率格挡
     if (shark.stats.armor > 0 && Math.random() * 100 < shark.stats.armor) {
       this.invuln = Math.max(this.invuln, 0.9);
@@ -872,6 +900,55 @@ export class GameEngine {
       }
     }
     return best;
+  }
+
+  updateGun(dt) {
+    if (!this.shop?.owned?.includes('gun')) return;
+    if (this.gunCooldown > 0) {
+      this.gunCooldown -= dt;
+      return;
+    }
+    const target = this.nearestHazardAhead(0.9);
+    if (!target) return;
+    const x = target.kind === 'rock' ? target.x + target.w / 2 : target.x;
+    const y = target.kind === 'rock' ? (target.side === 'top' ? target.h : this.h - target.h) : target.y;
+    this.bullets.push({
+      x: this.playerX() + this.playerR,
+      y: this.playerY,
+      target,
+      targetX: x,
+      targetY: y,
+      vx: this.h * 1.55,
+      r: clamp(this.h * 0.018, 7, 12),
+      t: 0,
+    });
+    this.gunCooldown = 5.5;
+    this.sound('gun');
+    this.pushFloatText('泡泡弹！', '#9fe8ff', this.playerX() + this.playerR, this.playerY - 30);
+  }
+
+  updateBullets(dt) {
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.t += dt;
+      b.x += b.vx * dt;
+      if (b.target && b.target.alive) {
+        b.targetX = b.target.kind === 'rock' ? b.target.x + b.target.w / 2 : b.target.x;
+        b.targetY = b.target.kind === 'rock' ? (b.target.side === 'top' ? b.target.h : this.h - b.target.h) : b.target.y;
+      }
+      b.y += (b.targetY - b.y) * Math.min(1, dt * 7);
+      const hitDist = b.target && b.target.alive
+        ? Math.max(b.r, b.target.kind === 'rock' ? Math.min(b.target.w, b.target.h) * 0.45 : (b.target.r || 20))
+        : 0;
+      if (b.target && b.target.alive && Math.hypot(b.x - b.targetX, b.y - b.targetY) < hitDist) {
+        this.destroyHazard(b.target, '#9fe8ff');
+        this.spawnPearlsAt(b.targetX, b.targetY, 2);
+        this.spawnParticles(b.x, b.y, '#9fe8ff', 8);
+        this.bullets.splice(i, 1);
+        continue;
+      }
+      if (b.x > this.w + 80 || b.y < -80 || b.y > this.h + 80) this.bullets.splice(i, 1);
+    }
   }
 
   // ------------------------------------------------------------------ particles/fx
@@ -1112,6 +1189,9 @@ export class GameEngine {
       this.tone(200, 0.5, 'sine', 0.05, 0, 640);
     } else if (name === 'ram') {
       this.tone(160, 0.22, 'square', 0.06, 0, 60);
+    } else if (name === 'gun') {
+      this.tone(760, 0.09, 'sine', 0.05, 0, 320);
+      this.tone(420, 0.12, 'square', 0.03, 0.04, 180);
     } else if (name === 'bubble') {
       this.tone(300, 0.22, 'sine', 0.06, 0, 720);
       this.tone(900, 0.3, 'sine', 0.03, 0.08, 420);
@@ -1139,6 +1219,7 @@ export class GameEngine {
       this.drawPickups();
       this.drawTropicalFish('near');
       this.drawShark();
+      this.drawBullets();
     } else {
       this.drawTropicalFish('far');
       this.drawAmbientShark();
@@ -1461,6 +1542,26 @@ export class GameEngine {
     ctx.restore();
   }
 
+  drawBullets() {
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of this.bullets) {
+      const glow = ctx.createRadialGradient(b.x, b.y, 0.5, b.x, b.y, b.r * 2.6);
+      glow.addColorStop(0, 'rgba(210,248,255,0.95)');
+      glow.addColorStop(1, 'rgba(90,210,255,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r * 2.6, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#dffaff';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   drawParticles() {
     const { ctx } = this;
     ctx.save();
@@ -1747,6 +1848,8 @@ export class GameEngine {
     else if (this.invuln > 0) alpha = 0.45 + 0.3 * Math.sin(this.time * 26);
     this.drawSharkShape(x, y, angle, alpha);
     this.drawBubbleShield(x, y, this.playerR * 2.3);
+    this.drawWeaponVisuals(x, y);
+    this.drawMiniCompanion(x, y);
   }
 
   drawBubbleShield(x, y, r) {
@@ -1806,6 +1909,7 @@ export class GameEngine {
       alpha,
     };
     this.drawTropicalFishShape(fish);
+    this.drawCharacterDecorations(ctx, L, L * 0.62);
     ctx.restore();
   }
 
@@ -1955,7 +2059,137 @@ export class GameEngine {
     }
     ctx.stroke();
 
+    this.drawCharacterDecorations(ctx, L, bodyH);
     ctx.restore();
+  }
+
+  drawCharacterDecorations(ctx, L, bodyH) {
+    const owned = this.shop?.owned || [];
+    if (!owned.length) return;
+    const top = -bodyH * 0.72;
+    if (owned.includes('hat')) {
+      ctx.fillStyle = '#f2c94c';
+      ctx.beginPath();
+      ctx.ellipse(L * 0.34, top - L * 0.055, L * 0.14, L * 0.05, 0, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(L * 0.34, top - L * 0.08, L * 0.09, Math.PI, TAU);
+      ctx.fill();
+      ctx.strokeStyle = '#c9932b';
+      ctx.lineWidth = Math.max(1.2, L * 0.015);
+      ctx.stroke();
+    }
+    if (owned.includes('bow')) {
+      const bx = L * 0.5;
+      const by = top + L * 0.035;
+      ctx.fillStyle = '#ff4f6d';
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(bx + side * L * 0.11, by - L * 0.06, bx + side * L * 0.13, by + L * 0.02);
+        ctx.quadraticCurveTo(bx + side * L * 0.11, by + L * 0.06, bx, by);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ff8fa3';
+      ctx.beginPath();
+      ctx.arc(bx, by, L * 0.025, 0, TAU);
+      ctx.fill();
+    }
+    if (owned.includes('flower')) {
+      const fx = L * 0.16;
+      const fy = top + L * 0.07;
+      ctx.fillStyle = '#ff9fc0';
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * TAU + 0.5;
+        ctx.beginPath();
+        ctx.ellipse(fx + Math.cos(a) * L * 0.04, fy + Math.sin(a) * L * 0.04, L * 0.038, L * 0.025, a, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffe38f';
+      ctx.beginPath();
+      ctx.arc(fx, fy, L * 0.025, 0, TAU);
+      ctx.fill();
+    }
+    if (owned.includes('necklace')) {
+      ctx.fillStyle = '#f5fbff';
+      for (let i = -4; i <= 4; i++) {
+        const nx = L * 0.18 + i * L * 0.055;
+        const ny = bodyH * (0.34 + Math.sin((i + 4) * 0.5) * 0.08);
+        ctx.beginPath();
+        ctx.arc(nx, ny, L * 0.021, 0, TAU);
+        ctx.fill();
+      }
+    }
+    if (owned.includes('socks')) {
+      ctx.fillStyle = '#ff8fa3';
+      for (const sx of [-L * 0.28, -L * 0.38]) {
+        ctx.beginPath();
+        ctx.rect(sx - L * 0.035, bodyH * 0.16, L * 0.07, bodyH * 0.34);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sx - L * 0.035, bodyH * 0.16, L * 0.07, bodyH * 0.07);
+        ctx.fillStyle = '#ff8fa3';
+      }
+    }
+  }
+
+  drawWeaponVisuals(x, y) {
+    if (!this.shop) return;
+    const { ctx } = this;
+    const r = this.playerR;
+    if (this.shieldCharges > 0 && this.shop.equippedShield) {
+      const def = getShieldDef(this.shop.equippedShield);
+      if (def) {
+        ctx.save();
+        ctx.translate(x + r * 0.85, y + r * 0.95);
+        ctx.scale(r / 16, r / 16);
+        ctx.fillStyle = def.color;
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -12);
+        ctx.lineTo(9, -8);
+        ctx.lineTo(9, -2);
+        ctx.lineTo(3, 3);
+        ctx.lineTo(3, 12);
+        ctx.lineTo(0, 9);
+        ctx.lineTo(-3, 12);
+        ctx.lineTo(-3, 3);
+        ctx.lineTo(-9, -2);
+        ctx.lineTo(-9, -8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    if (this.shop.owned?.includes('gun')) {
+      ctx.save();
+      ctx.translate(x + r * 0.72, y - r * 0.35);
+      ctx.scale(r / 16, r / 16);
+      ctx.fillStyle = '#7fd8f2';
+      ctx.strokeStyle = 'rgba(10,40,60,0.75)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(-4, -2, 11, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#c9f4ff';
+      ctx.beginPath();
+      ctx.arc(9, 0.5, 3.4, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  drawMiniCompanion(x, y) {
+    if (!this.shop?.owned?.includes('mini')) return;
+    const species = TROPICAL_FISH_SPECIES.find((item) => item.id !== this.shark?.speciesId) || TROPICAL_FISH_SPECIES[0];
+    const len = clamp(this.h * 0.035, 14, 26);
+    const mx = x - this.playerR * 1.9 + Math.sin(this.time * 1.7) * this.playerR * 0.7;
+    const my = y - this.playerR * 0.9 + Math.cos(this.time * 2.1) * this.playerR * 0.35;
+    const fish = { species, dir: 1, length: len, phase: this.time * 3, alpha: 0.95 };
+    this.drawTropicalFishShape(fish && { ...fish, x: mx, y: my });
   }
 
   sharkEye(ctx, x, y, r) {
@@ -2024,6 +2258,18 @@ export class GameEngine {
     ctx.fillStyle = 'rgba(190,238,255,0.9)';
     ctx.textAlign = 'left';
     ctx.fillText(`× ${this.pearls}`, 32 + this.safe.left, pearlY);
+
+    // 装备状态
+    let equipX = 22 + this.safe.left;
+    const equipY = pearlY + heartSize * 0.95;
+    ctx.font = `${Math.max(12, h * 0.024)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    if (this.shieldCharges > 0) {
+      ctx.fillText(`🛡️×${this.shieldCharges}`, equipX, equipY);
+      equipX += h * 0.075;
+    }
+    if (this.shop?.owned?.includes('gun')) {
+      ctx.fillText('🔫', equipX, equipY);
+    }
 
     // 能力按钮
     this.drawAbilityButton();

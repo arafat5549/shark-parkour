@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './game/GameEngine.js';
+import ShopPanel from './components/ShopPanel.jsx';
 import TuningPanel from './components/TuningPanel.jsx';
 import { GAME_TUNING } from './game/config.js';
+import {
+  LIFE_PILL_MAX_BOOST,
+  addWallet,
+  lifeBoostFor,
+  loadShopState,
+  ownsItem,
+  saveShopState,
+  spendWallet,
+} from './game/shop.js';
 import {
   MAX_STAT_VALUES,
   SHARKS,
@@ -78,20 +88,35 @@ export default function App() {
   const [rotateHint, setRotateHint] = useState(false);
   const rotateHintRef = useRef(false);
   const rotatePausedRef = useRef(false);
+  const [shop, setShop] = useState(() => loadShopState());
+  const [shopOpen, setShopOpen] = useState(false);
+  const shopRef = useRef(shop);
+  const shopOpenRef = useRef(false);
+  const touchStartRef = useRef(null);
 
   const setScreen = useCallback((next) => {
     screenRef.current = next;
     setScreenState(next);
   }, []);
 
+  useEffect(() => {
+    shopRef.current = shop;
+  }, [shop]);
+
   const handleGameOver = useCallback((stats) => {
     const previous = loadBest(stats.sharkId);
     saveBest(stats.sharkId, stats.score);
+    const nextShop = addWallet(shopRef.current, stats.pearls);
+    saveShopState(nextShop);
+    shopRef.current = nextShop;
+    setShop(nextShop);
+    engineRef.current?.setShopState(nextShop);
     setResult({
       ...stats,
       distanceM: Math.floor(stats.distance / 40),
       best: Math.max(previous, stats.score),
       newBest: stats.score > previous,
+      walletGain: stats.pearls,
     });
     setScreen('gameover');
   }, [setScreen]);
@@ -100,6 +125,7 @@ export default function App() {
     const engine = new GameEngine(canvasRef.current, { onGameOver: handleGameOver });
     engine.setMuted(loadMuted());
     engine.setPreviewShark(loadSelectedShark());
+    engine.setShopState(shopRef.current);
     engineRef.current = engine;
     return () => {
       engine.destroy();
@@ -109,7 +135,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (settingsOpenRef.current || rotateHintRef.current) return;
+      if (settingsOpenRef.current || rotateHintRef.current || shopOpenRef.current) return;
       if (e.code !== 'Escape' && e.code !== 'KeyP') return;
       const current = screenRef.current;
       if (current === 'playing') {
@@ -207,6 +233,76 @@ export default function App() {
     setScreen('menu');
   };
 
+  const openShop = () => {
+    shopOpenRef.current = true;
+    setShopOpen(true);
+  };
+
+  const closeShop = () => {
+    shopOpenRef.current = false;
+    setShopOpen(false);
+  };
+
+  const buyShopItem = (item) => {
+    const current = shopRef.current;
+    if (item.category === 'decor' && item.id !== 'life-pill') {
+      if (ownsItem(current, item.id)) return;
+      const next = spendWallet(current, item.price);
+      if (!next) return;
+      next.owned = [...current.owned, item.id];
+      commitShop(next);
+      return;
+    }
+
+    if (item.id === 'life-pill') {
+      const boost = lifeBoostFor(current, selected.id);
+      if (boost >= LIFE_PILL_MAX_BOOST) return;
+      const next = spendWallet(current, item.price);
+      if (!next) return;
+      next.lifeBoosts[selected.id] = boost + 1;
+      commitShop(next);
+      return;
+    }
+
+    if (item.category === 'weapon') {
+      if (item.id === 'gun') {
+        if (ownsItem(current, item.id)) return;
+        const next = spendWallet(current, item.price);
+        if (!next) return;
+        next.owned = [...current.owned, item.id];
+        commitShop(next);
+        return;
+      }
+      // 盾牌：未拥有则购买并自动装备；已拥有则只切换装备。
+      if (!ownsItem(current, item.id)) {
+        const next = spendWallet(current, item.price);
+        if (!next) return;
+        next.owned = [...current.owned, item.id];
+        next.equippedShield = item.id;
+        commitShop(next);
+      } else {
+        const next = { ...current, lifeBoosts: { ...current.lifeBoosts } };
+        next.equippedShield = item.id;
+        commitShop(next);
+      }
+    }
+  };
+
+  const equipShield = (item) => {
+    const current = shopRef.current;
+    if (!ownsItem(current, item.id)) return;
+    const next = { ...current, lifeBoosts: { ...current.lifeBoosts } };
+    next.equippedShield = item.id;
+    commitShop(next);
+  };
+
+  const commitShop = (next) => {
+    saveShopState(next);
+    shopRef.current = next;
+    setShop(next);
+    engineRef.current?.setShopState(next);
+  };
+
   const toggleMute = () => {
     setMutedState((old) => {
       const next = !old;
@@ -239,6 +335,25 @@ export default function App() {
     void applyPreferredOrientation();
   };
 
+  const handleMenuTouchStart = (e) => {
+    const touch = e.touches && e.touches[0];
+    if (!touch) return;
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, target: e.target };
+  };
+
+  const handleMenuTouchEnd = (e) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+    const touch = e.changedTouches && e.changedTouches[0];
+    if (!touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const inScrollArea = start.target && typeof start.target.closest === 'function'
+      && start.target.closest('.shark-picker, .ability-panel, .menu-actions, button, a, input');
+    if (dx > 72 && Math.abs(dx) > Math.abs(dy) * 1.35 && !inScrollArea) openShop();
+  };
+
   const inGame = screen === 'playing' || screen === 'paused' || screen === 'gameover';
 
   return (
@@ -267,7 +382,11 @@ export default function App() {
       )}
 
       {screen === 'menu' && (
-        <div className="screen menu-screen">
+        <div
+          className="screen menu-screen"
+          onTouchStart={handleMenuTouchStart}
+          onTouchEnd={handleMenuTouchEnd}
+        >
           <div className="menu-scroll">
             <header className="menu-header">
               <div className="logo-mark" aria-hidden="true">🦈</div>
@@ -366,6 +485,12 @@ export default function App() {
             </section>
 
             <div className="menu-actions">
+              <div className="shop-entry-row">
+                <button type="button" className="shop-open-button" onClick={openShop}>
+                  🛍️ 商店
+                </button>
+                <span className="wallet-chip">🦪 {shop.wallet.toLocaleString()}</span>
+              </div>
               <button type="button" className="start-button" onClick={() => startGame(selected)}>
                 <span>{selected.emoji}</span>
                 出发！{selected.name}
@@ -412,6 +537,9 @@ export default function App() {
               <div><b>{result.distanceM} m</b><span>距离</span></div>
               <div><b>{result.best.toLocaleString()}</b><span>最佳</span></div>
             </div>
+            {result.walletGain > 0 && (
+              <p className="wallet-gain">🦪 本局珍珠 +{result.walletGain} 已存入商店钱包</p>
+            )}
             <button type="button" className="primary-button" onClick={restartGame}>🦈 再游一次</button>
             <button type="button" className="ghost-button" onClick={backToMenu}>更换鲨鱼</button>
           </div>
@@ -439,6 +567,16 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {shopOpen && (
+        <ShopPanel
+          shop={shop}
+          selected={selected}
+          onClose={closeShop}
+          onBuy={buyShopItem}
+          onEquip={equipShield}
+        />
       )}
 
       {settingsOpen && <TuningPanel onClose={closeSettings} />}
